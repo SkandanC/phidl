@@ -591,42 +591,45 @@ def boolean(  # noqa: C901
         )
 
     # Check for trivial solutions
-    if (len(A_polys) == 0) or (len(B_polys) == 0):
-        if operation == "not":
-            if len(A_polys) == 0:
-                p = None
-            elif len(B_polys) == 0:
-                p = A_polys
+    if not A_polys:
+        if (
+            operation != "not"
+            and operation != "and"
+            and operation in ["or", "xor"]
+            and not B_polys
+            or operation == "not"
+            or operation == "and"
+        ):
+            p = None
+        elif operation in ["or", "xor"]:
+            p = B_polys
+    elif not B_polys:
+        if (
+            operation == "not"
+            or operation != "and"
+            and operation in ["or", "xor"]
+        ):
+            p = A_polys
         elif operation == "and":
             p = None
-        elif (operation == "or") or (operation == "xor"):
-            if (len(A_polys) == 0) and (len(B_polys) == 0):
-                p = None
-            elif len(A_polys) == 0:
-                p = B_polys
-            elif len(B_polys) == 0:
-                p = A_polys
+    elif all(np.array(num_divisions) == np.array([1, 1])):
+        p = gdspy.boolean(
+            operand1=A_polys,
+            operand2=B_polys,
+            operation=operation,
+            precision=precision,
+            max_points=max_points,
+            layer=gds_layer,
+            datatype=gds_datatype,
+        )
     else:
-        # If no trivial solutions, run boolean operation either in parallel or
-        # straight
-        if all(np.array(num_divisions) == np.array([1, 1])):
-            p = gdspy.boolean(
-                operand1=A_polys,
-                operand2=B_polys,
-                operation=operation,
-                precision=precision,
-                max_points=max_points,
-                layer=gds_layer,
-                datatype=gds_datatype,
-            )
-        else:
-            p = _boolean_polygons_parallel(
-                polygons_A=A_polys,
-                polygons_B=B_polys,
-                num_divisions=num_divisions,
-                operation=operation,
-                precision=precision,
-            )
+        p = _boolean_polygons_parallel(
+            polygons_A=A_polys,
+            polygons_B=B_polys,
+            num_divisions=num_divisions,
+            operation=operation,
+            precision=precision,
+        )
 
     if p is not None:
         polygons = D.add_polygon(p, layer=layer)
@@ -716,10 +719,7 @@ def outline(
 
     Trim = Device()
     if open_ports is not False:
-        if open_ports is True:
-            trim_width = 0
-        else:
-            trim_width = open_ports * 2
+        trim_width = 0 if open_ports is True else open_ports * 2
         for port in port_list:
             trim = compass(size=(distance + 6 * precision, port.width + trim_width))
             trim_ref = Trim << trim
@@ -789,7 +789,7 @@ def invert(
     R = rectangle(size=(Temp.xsize + 2 * border, Temp.ysize + 2 * border))
     R.center = Temp.center
 
-    D = boolean(
+    return boolean(
         A=R,
         B=Temp,
         operation="A-B",
@@ -798,7 +798,6 @@ def invert(
         max_points=max_points,
         layer=layer,
     )
-    return D
 
 
 def xor_diff(A, B, precision=1e-4):
@@ -913,10 +912,13 @@ def _union_polygons(polygons, precision=1e-4, max_points=4000):
         PolygonSet.
     """
     polygons = _merge_floating_point_errors(polygons, tol=precision / 1000)
-    unioned = gdspy.boolean(
-        polygons, [], operation="or", precision=precision, max_points=max_points
+    return gdspy.boolean(
+        polygons,
+        [],
+        operation="or",
+        precision=precision,
+        max_points=max_points,
     )
-    return unioned
 
 
 def _merge_floating_point_errors(polygons, tol=1e-10):
@@ -944,8 +946,7 @@ def _merge_floating_point_errors(polygons, tol=1e-10):
     xfixed = _merge_nearby_floating_points(x, tol=tol)
     yfixed = _merge_nearby_floating_points(y, tol=tol)
     stacked_polygons_fixed = np.vstack([xfixed, yfixed]).T
-    polygons_fixed = np.vsplit(stacked_polygons_fixed, polygon_indices[:-1])
-    return polygons_fixed
+    return np.vsplit(stacked_polygons_fixed, polygon_indices[:-1])
 
 
 def _merge_nearby_floating_points(x, tol=1e-10):
@@ -1057,9 +1058,7 @@ def _crop_edge_polygons(all_polygons, bboxes, left, bottom, right, top, precisio
     polygons_edge_cropped = _crop_region(
         polygons_edge, left, bottom, right, top, precision=precision
     )
-    polygons_to_process = polygons_in_rect_no_edge + polygons_edge_cropped
-
-    return polygons_to_process
+    return polygons_in_rect_no_edge + polygons_edge_cropped
 
 
 def _find_bboxes_in_rect(bboxes, left, bottom, right, top):
@@ -1085,13 +1084,12 @@ def _find_bboxes_in_rect(bboxes, left, bottom, right, top):
     result : list
         List of all polygon bboxes that overlap with the defined rectangle.
     """
-    result = (
+    return (
         (bboxes[:, 0] <= right)
         & (bboxes[:, 2] >= left)
         & (bboxes[:, 1] <= top)
         & (bboxes[:, 3] >= bottom)
     )
-    return result
 
 
 # _find_bboxes_on_rect_edge
@@ -1123,8 +1121,7 @@ def _find_bboxes_on_rect_edge(bboxes, left, bottom, right, top):
     bboxes_right = _find_bboxes_in_rect(bboxes, right, bottom, right, top)
     bboxes_top = _find_bboxes_in_rect(bboxes, left, top, right, top)
     bboxes_bottom = _find_bboxes_in_rect(bboxes, left, bottom, right, bottom)
-    result = bboxes_left | bboxes_right | bboxes_top | bboxes_bottom
-    return result
+    return bboxes_left | bboxes_right | bboxes_top | bboxes_bottom
 
 
 def _offset_region(
@@ -1199,11 +1196,9 @@ def _offset_region(
     polygons_offset = clipper.offset(
         polygons_to_offset, distance, join, tolerance, 1 / precision, int(join_first)
     )
-    polygons_offset_cropped = _crop_region(
+    return _crop_region(
         polygons_offset, left, bottom, right, top, precision=precision
     )
-
-    return polygons_offset_cropped
 
 
 def _polygons_to_bboxes(polygons):
@@ -1284,8 +1279,8 @@ def _offset_polygons_parallel(
     ycorners = ymin + np.arange(num_divisions[1]) * ydelta
 
     offset_polygons = []
-    for n, xc in enumerate(xcorners):
-        for m, yc in enumerate(ycorners):
+    for xc in xcorners:
+        for yc in ycorners:
             left = xc
             right = xc + xdelta
             bottom = yc
@@ -1359,10 +1354,9 @@ def _boolean_region(
     polygons_to_boolean_B = _crop_edge_polygons(
         all_polygons_B, bboxes_B, left, bottom, right, top, precision
     )
-    polygons_boolean = clipper.clip(
+    return clipper.clip(
         polygons_to_boolean_A, polygons_to_boolean_B, operation, 1 / precision
     )
-    return polygons_boolean
 
 
 def _boolean_polygons_parallel(
@@ -1413,8 +1407,8 @@ def _boolean_polygons_parallel(
     ycorners = ymin + np.arange(num_divisions[1]) * ydelta
 
     boolean_polygons = []
-    for n, xc in enumerate(xcorners):
-        for m, yc in enumerate(ycorners):
+    for xc in xcorners:
+        for yc in ycorners:
             left = xc
             right = xc + xdelta
             bottom = yc
@@ -1468,8 +1462,12 @@ def litho_steps(line_widths=[1, 2, 4, 8, 16], line_spacing=10, height=100, layer
 
     height = height / 2
     T1 = text(
-        text="%s" % str(line_widths[-1]), size=height, justify="center", layer=layer
+        text=f"{str(line_widths[-1])}",
+        size=height,
+        justify="center",
+        layer=layer,
     )
+
     _ = D.add_ref(T1).rotate(90).movex(-height / 10)
     R1 = rectangle(size=(line_spacing, height), layer=layer)
     D.add_ref(R1).movey(-height)
@@ -1785,9 +1783,9 @@ def import_gds(filename, cellname=None, flatten=False):
                 "(named %s) is not present in file %s" % (cellname, filename)
             )
         topcell = gdsii_lib.cells[cellname]
-    elif cellname is None and len(top_level_cells) == 1:
+    elif len(top_level_cells) == 1:
         topcell = top_level_cells[0]
-    elif cellname is None and len(top_level_cells) > 1:
+    elif len(top_level_cells) > 1:
         raise ValueError(
             "[PHIDL] import_gds() There are multiple top-level "
             "cells, you must specify `cellname` to select of "
@@ -1814,7 +1812,7 @@ def import_gds(filename, cellname=None, flatten=False):
                     layer=(label.layer, label.texttype),
                 )
                 l.anchor = label.anchor
-            c2dmap.update({cell: D})
+            c2dmap[cell] = D
             D_list.append(D)
 
         for D in D_list:
@@ -1852,10 +1850,9 @@ def import_gds(filename, cellname=None, flatten=False):
             for p in temp_polygons:
                 D.add_polygon(p)
 
-        topdevice = c2dmap[topcell]
-        return topdevice
+        return c2dmap[topcell]
 
-    elif flatten:
+    else:
         D = Device("import_gds")
         polygons = topcell.get_polygons(by_spec=True)
 
@@ -1915,11 +1912,12 @@ def preview_layerset(ls, size=100, spacing=100):
     for n, layer in enumerate(sorted_layers):
         R = rectangle(size=(100 * scale, 100 * scale), layer=layer)
         T = text(
-            text="{}\n{} / {}".format(layer.name, layer.gds_layer, layer.gds_datatype),
+            text=f"{layer.name}\n{layer.gds_layer} / {layer.gds_datatype}",
             size=20 * scale,
             justify="center",
             layer=layer,
         )
+
 
         T.move((50 * scale, -20 * scale))
         xloc = n % matrix_size
@@ -1981,9 +1979,7 @@ def _convert_port_to_geometry(port, layer=0):
     The Port must start with a parent.
     """
     if port.parent is None:
-        raise ValueError(
-            "Port {}: Port needs a parent in which to draw".format(port.name)
-        )
+        raise ValueError(f"Port {port.name}: Port needs a parent in which to draw")
     if isinstance(port.parent, DeviceReference):
         device = port.parent.parent
     else:
@@ -2238,52 +2234,56 @@ def compass_multi(size=(4, 2), ports={"N": 3, "S": 4}, layer=0):
         p_list = np.linspace(-m, m, num_ports)
         [
             D.add_port(
-                name=("N%s" % (n + 1)),
+                name=f"N{n + 1}",
                 midpoint=[p, dy],
                 width=dx / num_ports * 2,
                 orientation=90,
             )
             for n, p in enumerate(p_list)
         ]
+
     if "S" in ports:
         num_ports = ports["S"]
         m = dx - dx / num_ports
         p_list = np.linspace(-m, m, num_ports)
         [
             D.add_port(
-                name=("S%s" % (n + 1)),
+                name=f"S{n + 1}",
                 midpoint=[p, -dy],
                 width=dx / num_ports * 2,
                 orientation=-90,
             )
             for n, p in enumerate(p_list)
         ]
+
     if "E" in ports:
         num_ports = ports["E"]
         m = dy - dy / num_ports
         p_list = np.linspace(-m, m, num_ports)
         [
             D.add_port(
-                name=("E%s" % (n + 1)),
+                name=f"E{n + 1}",
                 midpoint=[dx, p],
                 width=dy / num_ports * 2,
                 orientation=0,
             )
             for n, p in enumerate(p_list)
         ]
+
     if "W" in ports:
         num_ports = ports["W"]
         m = dy - dy / num_ports
         p_list = np.linspace(-m, m, num_ports)
         [
             D.add_port(
-                name=("W%s" % (n + 1)),
+                name=f"W{n + 1}",
                 midpoint=[-dx, p],
                 width=dy / num_ports * 2,
                 orientation=180,
             )
             for n, p in enumerate(p_list)
         ]
+
 
     return D
 
@@ -2626,8 +2626,7 @@ def _microstrip_Z_with_Lk(wire_width, dielectric_thickness, eps_r, Lk_per_sq):
     # to input Lk as a per-meter inductance
     L_m, C_m = _microstrip_LC_per_meter(wire_width, dielectric_thickness, eps_r)
     Lk_m = Lk_per_sq * (1.0 / wire_width)
-    Z = sqrt((L_m + Lk_m) / C_m)
-    return Z
+    return sqrt((L_m + Lk_m) / C_m)
 
 
 def _microstrip_v_with_Lk(wire_width, dielectric_thickness, eps_r, Lk_per_sq):
@@ -2661,8 +2660,7 @@ def _microstrip_v_with_Lk(wire_width, dielectric_thickness, eps_r, Lk_per_sq):
     """
     L_m, C_m = _microstrip_LC_per_meter(wire_width, dielectric_thickness, eps_r)
     Lk_m = Lk_per_sq * (1.0 / wire_width)
-    v = 1 / sqrt((L_m + Lk_m) * C_m)
-    return v
+    return 1 / sqrt((L_m + Lk_m) * C_m)
 
 
 def _find_microstrip_wire_width(Z_target, dielectric_thickness, eps_r, Lk_per_sq):
@@ -3069,8 +3067,6 @@ def text(text="abcd", size=10, justify="left", layer=0, font="DEPLOF"):
 
     justify = justify.lower()
     for l in t.references:
-        if justify == "left":
-            pass
         if justify == "right":
             l.xmax = 0
         if justify == "center":
@@ -3268,7 +3264,7 @@ def _racetrack_gradual_parametric(t, R, N):
     # Doing the math
     x = cos(t * pi / 2) * R0  # t (0-1) while x (0 to R0)
     ii = (Rmin / sqrt(2) < x) & (x <= R0)
-    jj = (0 < x) & (x <= Rmin / sqrt(2))
+    jj = (x > 0) & (x <= Rmin / sqrt(2))
     y[ii] = (R**N - (x[ii] + (x0 - Rmin / sqrt(2))) ** N) ** (1 / N)
     y[jj] = (x0 - Rmin / sqrt(2)) + sqrt(Rmin**2 - x[jj] ** 2)
     return x, y

@@ -52,79 +52,80 @@ def write_docstring(
         will be sorted as B, G, Z, a, f.
     """
     os.chdir(main_path)
-    fr = open(fread)
-    flines = fr.readlines()
-    fr.close()
+    with open(fread) as fr:
+        flines = fr.readlines()
     os.chdir(source_path)
-    fw = open(fwrite, "a+")
-
-    # Creating headers
-    if os.stat(fwrite).st_size == 0:
-        fw.write(
-            "#" * len(main_header)
-            + "\n{}\n".format(main_header)
-            + "#" * len(main_header)
-            + "\n\n\n"
-        )
-    if sub_header is not None:
-        sub_header = " " + sub_header
-    else:
-        sub_header = ""
-    fread_header = fread_name = fread[:-3]
-    if "_" in fread_header:
-        fread_header = (
-            fread_header.split("_")[0].capitalize()
-            + " "
-            + fread_header.split("_")[1].capitalize()
-        )
-    else:
-        fread_header = fread_header.capitalize()
-    fw.write(
-        "*" * (len(fread_header) + len(sub_header))
-        + "\n{}{}\n".format(fread_header, sub_header)
-        + "*" * (len(fread_header) + len(sub_header))
-        + "\n\n"
-    )
-
-    # Gathering all functions and classes as tuples of (name, type).
-    # Single-letter functions are appended a unique string to prevent them from
-    # being incorrectly sorted.
-    names = []
-    for line in flines:
-        if line[0:5] == "class":
-            cname = line[6 : line.find("(")]
-            if cname[-1] == ":":
-                cname = cname[:-1]
-            if cname[0] != "_":
-                names.append((cname, "C"))
-        if line[0:3] == "def":
-            fname = line[4 : line.find("(")]
-            if len(fname) == 1:
-                fname = fname.lower() + "GENAPIFUNC"
-            if fname[0] != "_":
-                names.append((fname, "F"))
-    # Sorting by type first and then alphabetically
-    names = sorted(names, key=itemgetter(1, 0))
-
-    for name in names:
-        # Fixing single-letter function names
-        if "GENAPIFUNC" in name[0]:
-            name = (name[0].replace("GENAPIFUNC", ""), "F")
-            name = (name[0].upper(), "F")
-
-        # Writing to file in Sphinx markdown format
-        fw.write(name[0] + "\n")
-        fw.write(("=" * len(name[0])) + "\n\n")
-        if name[1] == "C":
-            fw.write(".. autoclass:: phidl.{}.{}\n".format(fread_name, name[0]))
+    with open(fwrite, "a+") as fw:
+            # Creating headers
+        if os.stat(fwrite).st_size == 0:
             fw.write(
-                "   :members:\n"
-                "   :inherited-members:\n"
-                "   :show-inheritance:\n\n\n"
+                (
+                    ("#" * len(main_header) + f"\n{main_header}\n")
+                    + "#" * len(main_header)
+                    + "\n\n\n"
+                )
+            )
+
+        sub_header = f" {sub_header}" if sub_header is not None else ""
+        fread_header = fread_name = fread[:-3]
+        if "_" in fread_header:
+            fread_header = (
+                fread_header.split("_")[0].capitalize()
+                + " "
+                + fread_header.split("_")[1].capitalize()
             )
         else:
-            fw.write(".. autofunction:: phidl.{}.{}\n\n\n".format(fread_name, name[0]))
-    fw.close()
+            fread_header = fread_header.capitalize()
+        fw.write(
+            (
+                (
+                    "*" * (len(fread_header) + len(sub_header))
+                    + f"\n{fread_header}{sub_header}\n"
+                )
+                + "*" * (len(fread_header) + len(sub_header))
+                + "\n\n"
+            )
+        )
+
+
+        # Gathering all functions and classes as tuples of (name, type).
+        # Single-letter functions are appended a unique string to prevent them from
+        # being incorrectly sorted.
+        names = []
+        for line in flines:
+            if line[:5] == "class":
+                cname = line[6 : line.find("(")]
+                if cname[-1] == ":":
+                    cname = cname[:-1]
+                if cname[0] != "_":
+                    names.append((cname, "C"))
+            if line[:3] == "def":
+                fname = line[4 : line.find("(")]
+                if len(fname) == 1:
+                    fname = f"{fname.lower()}GENAPIFUNC"
+                if fname[0] != "_":
+                    names.append((fname, "F"))
+        # Sorting by type first and then alphabetically
+        names = sorted(names, key=itemgetter(1, 0))
+
+        for name in names:
+            # Fixing single-letter function names
+            if "GENAPIFUNC" in name[0]:
+                name = (name[0].replace("GENAPIFUNC", ""), "F")
+                name = (name[0].upper(), "F")
+
+            # Writing to file in Sphinx markdown format
+            fw.write(name[0] + "\n")
+            fw.write(("=" * len(name[0])) + "\n\n")
+            if name[1] == "C":
+                fw.write(f".. autoclass:: phidl.{fread_name}.{name[0]}\n")
+                fw.write(
+                    "   :members:\n"
+                    "   :inherited-members:\n"
+                    "   :show-inheritance:\n\n\n"
+                )
+            else:
+                fw.write(f".. autofunction:: phidl.{fread_name}.{name[0]}\n\n\n")
 
 
 # Gathering command-line arguments
@@ -152,9 +153,7 @@ py_path = input(
     "Name of the project subfolder containing the package " "Python files: "
 )
 main_path = join(dirname(dirname(source_path)), py_path)
-if exists(join(main_path, args[0])):
-    pass
-else:
+if not exists(join(main_path, args[0])):
     raise ValueError("Python subfolder path is not valid.")
 
 # Executing write_docstring
